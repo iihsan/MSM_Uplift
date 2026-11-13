@@ -66,21 +66,29 @@ def save_checkpoint(state: dict, directory: str, filename: str):
     torch.save(state, os.path.join(directory, filename))
 
 def get_method_name(flags) -> str:
-    use_msm   = getattr(flags, 'use_msm',   False)
-    msm_uplift  = getattr(flags, 'msm_uplift',  False)
-    msm_learn = getattr(flags, 'msm_learn', False)
-    alpha     = getattr(flags, 'alpha',     0.0)
-    if   not use_msm and alpha == 0: return 'CE'
-    elif     use_msm and alpha == 0:
-        if msm_learn: return 'MSM_LEARN'
-        return 'MSM_UPLIFT' if msm_uplift else 'MSM'
-    elif not use_msm and alpha >  0: return 'FOP'
-    else:
-        return 'OURS_LEARN' if msm_learn else 'OURS'
+    if not flags.use_msm and flags.alpha == 0: return 'CE'
+    if flags.use_msm and flags.alpha == 0:
+        if flags.msm_learn_q: return 'MSM_LEARN_Q'
+        if flags.msm_linear: return 'MSM_LINEAR'
+        if flags.msm_random_orthogonal: return 'MSM_RANDOM_ORTHO'
+        return 'MSM_UPLIFT' if flags.msm_uplift else 'MSM'
+    if not flags.use_msm and flags.alpha > 0: return 'FOP'
+    return 'OURS'
+
 
 def build_model(FLAGS, img_dim: int, txt_dim: int) -> FOP:
     model = FOP(FLAGS, img_dim, txt_dim)
     model.apply(init_weights)
+
+    if FLAGS.use_msm and FLAGS.msm_uplift:
+        if FLAGS.msm_linear:
+            model.initialize_msm_linear()
+        else:
+            model.initialize_msm_projection(
+                seed=FLAGS.projection_seed,
+                trainable=bool(FLAGS.msm_learn_q),
+            )
+
     if FLAGS.cuda:
         model.cuda()
         cudnn.benchmark = False
@@ -108,7 +116,7 @@ def build_optimizer(model: FOP, FLAGS) -> optim.Adam:
         ]
     if not FLAGS.use_msm:
         params.append({'params': model.logits_layer.parameters()})
-    elif getattr(FLAGS, 'msm_learn', False):
+    elif FLAGS.msm_linear or FLAGS.msm_learn_q:
         params.append({'params': model.msm_expand.parameters()})
     if FLAGS.use_aux:
         params.append({'params': model.img_aux.parameters()})
@@ -151,10 +159,14 @@ def main():
     parser.add_argument('--use_msm',        action='store_true', default=False)
     parser.add_argument('--msm_uplift',       action='store_true', default=False,
                         help='Canonical C*(C-1) ETF + frozen isometric lift. Requires --use_msm.')
-    parser.add_argument('--msm_learn',      action='store_true', default=False,
-                        help='Canonical C*(C-1) ETF + LEARNABLE Linear(C-1->D) expansion. '
-                             'Requires --use_msm. Same architecture as --msm_uplift but '
-                             'msm_expand is trained by the optimizer (xavier init).')
+    parser.add_argument('--msm_linear',    action='store_true', default=False,
+                        help='Trainable Xavier-initialized linear expansion; expanded prototypes are not ETF at initialization.')
+    parser.add_argument('--msm_learn_q',    action='store_true', default=False,
+                        help='Canonical ETF with a learnable orthogonal projection initialized at Q.')
+    parser.add_argument('--msm_random_orthogonal', action='store_true', default=False,
+                        help='Canonical ETF with a fixed random orthogonal projection; use --projection_seed.')
+    parser.add_argument('--projection_seed', type=int, default=None,
+                        help='Seed used only to construct the orthogonal projection Q.')
     parser.add_argument('--use_aux',        action='store_true')
     parser.add_argument('--aux_weight',     type=float)
     parser.add_argument('--alpha',          type=float, default=0.0)
@@ -177,12 +189,20 @@ def main():
 
     if FLAGS.msm_uplift  and not FLAGS.use_msm:
         parser.error('--msm_uplift requires --use_msm')
-    if FLAGS.msm_learn and not FLAGS.use_msm:
-        parser.error('--msm_learn requires --use_msm')
-    if FLAGS.msm_learn and FLAGS.msm_uplift:
-        parser.error('--msm_learn and --msm_uplift are mutually exclusive')
-    if FLAGS.msm_learn:
+    projection_modes = [
+        FLAGS.msm_linear,
+        FLAGS.msm_learn_q,
+        FLAGS.msm_random_orthogonal,
+    ]
+    if any(projection_modes) and not FLAGS.use_msm:
+        parser.error('MSM projection options require --use_msm')
+    if sum(bool(x) for x in projection_modes) > 1:
+        parser.error('--msm_linear, --msm_learn_q, and '
+                     '--msm_random_orthogonal are mutually exclusive')
+    if any(projection_modes):
         FLAGS.msm_uplift = True
+    if FLAGS.projection_seed is None:
+        FLAGS.projection_seed = FLAGS.seed
 
     os.environ['PYTHONHASHSEED'] = str(FLAGS.seed)
     random.seed(FLAGS.seed)
@@ -196,6 +216,11 @@ def main():
     feat_dir      = FLAGS.feat_dir or DEFAULT_FEAT_DIRS[FLAGS.dataset]
     ds_cfg        = cfg_cls(feat_dir)
     FLAGS.num_classes = ds_cfg.num_classes
+    if FLAGS.use_msm and FLAGS.msm_uplift and FLAGS.dim_embed < FLAGS.num_classes - 1:
+        parser.error(
+            f'--dim_embed must be >= num_classes-1 ({FLAGS.num_classes - 1}) '
+            'for MSM uplift projections'
+        )
     method        = get_method_name(FLAGS)
     device        = torch.device('cuda' if FLAGS.cuda else 'cpu')
 
@@ -203,7 +228,7 @@ def main():
     print(f'  dataset={FLAGS.dataset}  method={method}  fusion={FLAGS.fusion}')
     print(f'  dim_embed={FLAGS.dim_embed}  alpha={FLAGS.alpha}  '
           f'use_msm={FLAGS.use_msm}  msm_uplift={FLAGS.msm_uplift}  '
-          f'msm_learn={getattr(FLAGS, "msm_learn", False)}')
+          f'msm_linear={FLAGS.msm_linear}')
     print(f'  train_img_drop={FLAGS.train_img_drop}%  '
           f'train_txt_drop={FLAGS.train_txt_drop}%')
     print(f'  use_aux={FLAGS.use_aux}  aux_weight={FLAGS.aux_weight}  '
@@ -238,8 +263,12 @@ def main():
 
     drop_tag = (f'_imgdrop{FLAGS.train_img_drop}_txtdrop{FLAGS.train_txt_drop}'
                 if FLAGS.train_img_drop > 0 or FLAGS.train_txt_drop > 0 else '')
-    if getattr(FLAGS, 'msm_learn', False):
-        proj_tag = '_learn'
+    if getattr(FLAGS, 'msm_learn_q', False):
+        proj_tag = '_learnQ'
+    elif getattr(FLAGS, 'msm_linear', False):
+        proj_tag = '_linearXavier'
+    elif getattr(FLAGS, 'msm_random_orthogonal', False):
+        proj_tag = f'_randomOrtho{FLAGS.projection_seed}'
     elif FLAGS.msm_uplift:
         proj_tag = '_uplift'
     else:
@@ -249,7 +278,7 @@ def main():
     # Single hierarchy shared by checkpoints and the final benchmark CSV, so a
     # given run is never scattered across differently-shaped paths:
     #   {root}/{dataset}/{fusion}/aux{aux}/seed{seed}/dim{dim}/...
-    run_dir  = (f'{ds_cfg.short_name}/{FLAGS.fusion}/aux{FLAGS.aux_weight}'
+    run_dir  = (f'{ds_cfg.short_name}/{FLAGS.fusion}/{method}/aux{FLAGS.aux_weight}'
                 f'/seed{FLAGS.seed}/dim{FLAGS.dim_embed}')
     save_dir = f'raw_ckpt/{run_dir}'
     best_dir = f'best/{run_dir}'

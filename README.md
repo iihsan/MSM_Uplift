@@ -1,25 +1,16 @@
-# Geometry-Preserving Uplift of Equiangular Tight Frame Prototypes for Robust Multimodal Learning under Missing Modalities
+# Geometry-Preserving Uplift of ETF Prototypes for Robust Multimodal Learning under Missing Modalities
 
-This repository provides training and evaluation scripts for multimodal learning experiments using **MSM** and **MSM Uplift** across three benchmark datasets:
+Training and evaluation code for UPMC Food-101, MM-IMDb, and Hateful
+Memes using cross-entropy (CE), canonical Max-Separated Matrix (MSM)
+prototypes, and MSM projection variants.
 
-- **UPMC Food-101**
-- **MM-IMDb**
-- **Hateful Memes**
+## 1. Dataset preparation
 
-The implementation supports multiple fusion strategies, embedding dimensions, canonical and uplifted MSM configurations, and modality-dropout experiments to evaluate model robustness under missing or corrupted modalities.
+Download the precomputed CLIP features and extract them into:
 
----
-
-## 1. Dataset Preparation
-
-Before running experiments, download the precomputed CLIP embeddings for the required datasets.
-
-| Dataset | Download Link | Expected Directory |
-|---|---|---|
-| UPMC Food-101 | [Zenodo – Food-101](https://zenodo.org/records/24032786) | `./features_CLIP_Food101` |
-| MM-IMDb | [Zenodo – MM-IMDb](https://zenodo.org/records/24033803) | `./features_CLIP_IMDb` |
-| Hateful Memes | [Zenodo – Hateful Memes](https://zenodo.org/records/24034415) | `./features_CLIP_HatefulMemes` |
-
+Downloads: [Food-101](https://zenodo.org/records/24032786),
+[MM-IMDb](https://zenodo.org/records/24033803), [Hateful
+Memes](https://zenodo.org/records/24034415).
 
 Extract the downloaded files into their respective directories, preserving the expected directory structure.
 
@@ -33,279 +24,260 @@ project/
 └── output/
 ```
 
-**Note:** Ensure that the feature files are placed in the expected directories before starting training.
+## 2. Environment
 
----
+Install the CUDA-enabled PyTorch build appropriate for your machine from
+the [PyTorch installation
+selector](https://pytorch.org/get-started/locally/), then install
+project dependencies:
 
-## 2. Environment Setup
-
-Install the required Python dependencies:
-Install the CUDA-enabled PyTorch build separately using the official selector: https://pytorch.org/get-started/locally/
-
-# Then install the remaining project dependencies:
-
-```bash
+``` bash
 pip install -r requirements.txt
 ```
-
-It is recommended to use a dedicated Python virtual environment.
-
-```bash
-python -m venv venv
-```
-
-Activate the environment:
-
-**Linux / macOS:**
-
-```bash
-source venv/bin/activate
-```
-
-**Windows:**
-
-```bash
-venv\Scripts\activate
-```
-
-Then install the dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
----
 
 ## 3. Training
 
-All experiments are executed through `train.py`.
+General command:
 
-### 3.1. General Command Structure
-
-```bash
-python train.py \
-    --dataset [food101|mm_imdb|hateful_memes] \
-    --fusion [linear|hadamard] \
-    --dim_embed [1|22|100|512] \
-    --use_msm \
-    --msm_uplift \
-    --seed [1|2|3|4|5]
+``` bash
+python train.py --dataset food101 --fusion hadamard --dim_embed 512 --use_msm [PROJECTION_FLAG] --seed 1
 ```
 
-### 3.2. Training Arguments
+Supported datasets: `food101`, `mm_imdb`, `hateful_memes`.
 
-| Argument | Description |
-|---|---|
-| `--dataset` | Selects the dataset: `food101`, `mm_imdb`, or `hateful_memes`. |
-| `--fusion` | Selects the fusion strategy: `linear` or `hadamard`. |
-| `--dim_embed` | Specifies the embedding dimension used by the MSM configuration. |
-| `--use_msm` | Enables the MSM CxC-1 configuration. |
-| `--msm_uplift` | Enables the Uplifted MSM Cx512 configuration. |
-| `--seed` | Sets the random seed for reproducibility. |
-| `--train_img_drop` | Specifies the percentage of image modality dropped during training. |
-| `--train_txt_drop` | Specifies the percentage of text modality dropped during training. |
+Supported fusion strategies: `linear`, `hadamard`.
 
-**Important:**
-- Use `--use_msm` to enable MSM.
-- Add `--msm_uplift` to enable uplifted MSM.
-- Omit `--msm_uplift` when running canonical MSM.
-- Training modality-drop percentages are specified independently for image and text modalities.
-- The `--seed` argument can be varied across multiple runs to evaluate reproducibility.
+### 3.1 Main arguments
 
----
+  -----------------------------------------------------------------------
+  Argument                            Description
+  ----------------------------------- -----------------------------------
+  `--dataset`                         Dataset identifier: `food101`,
+                                      `mm_imdb`, or `hateful_memes`.
 
-## 4. Dataset-Specific Experiments
+  `--fusion`                          Fusion strategy: `linear`, or `hadamard`.
 
-The following commands provide the recommended configurations for each dataset.
+  `--dim_embed`                       Image/text/fused embedding
+                                      dimension; commonly `512` for
+                                      uplift experiments.
 
-### 4.1. UPMC Food-101
+  `--use_msm`                         Enables MSM-based classification.
 
-**Canonical MSM**
+  `--seed`                            Training random seed (default:
+                                      `1`).
 
-```bash
-python train.py --dataset food101 --fusion hadamard --dim_embed 100 --use_msm --seed 1
-```
+  `--train_img_drop`                  Percentage of training samples
+                                      whose image features are zeroed.
 
-**Uplifted MSM**
+  `--train_txt_drop`                  Percentage of training samples
+                                      whose text features are zeroed.
 
-```bash
+  `--lr`                              Learning rate (default: `1e-4`).
+
+  `--batch_size`                      Batch size (default: `512`).
+
+  `--max_num_epoch`                   Training epochs (default: `50`).
+
+  `--no_cuda`                         Forces CPU execution.
+  -----------------------------------------------------------------------
+
+### 3.2 MSM methods and projection flags
+
+Use `--use_msm` with **at most one** projection option. The projection
+options are mutually exclusive.
+
+  -------------------------------------------------------------------------------------------------
+  Command option              Output method name   Initialization   Projection     Geometry at
+                                                                    optimized?     initialization
+  --------------------------- -------------------- ---------------- -------------- ----------------
+  `--msm_uplift`              `MSM_UPLIFT`         Fixed            No             Preserved
+                                                   orthogonal-row                  
+                                                   isometric Q                               
+
+  `--msm_learn_q`             `MSM_LEARN_Q`        Orthogonal-row Q Yes            Preserved
+                                                                                   initially
+
+  `--msm_linear`              `MSM_LINEAR`         Xavier-uniform   Yes            Not guaranteed
+                                                   linear weights                  
+  -------------------------------------------------------------------------------------------------
+
+#### A. Fixed isometric MSM uplift
+
+``` bash
 python train.py --dataset food101 --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --seed 1
 ```
 
-**Training with 70% Image Modality Drop**
+The canonical ETF prototypes are expanded using an orthogonal-row
+projection Q satisfying (QQ\^`\top`{=tex}=I). Q is frozen during
+training, so the expanded prototypes preserve the canonical ETF pairwise
+geometry.
 
-```bash
-python train.py --dataset food101 --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --train_img_drop 70 --seed 1
+#### B. Learnable orthogonal initialization (Learn-Q)
+
+``` bash
+python train.py --dataset food101 --fusion hadamard --dim_embed 512 --use_msm --msm_learn_q --seed 1
 ```
 
-**Training with 70% Text Modality Drop**
+Q is initialized with orthonormal rows and then optimized through
+backpropagation. ETF geometry is preserved at initialization, but
+orthogonality is not constrained during training; the learned projection
+can distort that geometry.
 
-```bash
-python train.py --dataset food101 --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --train_txt_drop 70 --seed 1
+#### C. Learnable Xavier initialization (Linear Xavier)
+
+``` bash
+python train.py --dataset food101 --fusion hadamard --dim_embed 512 --use_msm --msm_linear --seed 1
 ```
 
-### 4.2. MM-IMDb
+The projection layer is initialized using Xavier uniform initialization
+and optimized through backpropagation. It is not initialized as an
+orthogonal matrix, so ETF geometry is not guaranteed initially or during
+training.
 
-**Canonical MSM**
+#### E. Canonical MSM (no uplift)
 
-```bash
-python train.py --dataset mm_imdb --fusion hadamard --dim_embed 22 --use_msm --seed 1
-```
+Omit all projection flags and set the embedding dimension to (C-1):
 
-**Uplifted MSM**
-
-```bash
-python train.py --dataset mm_imdb --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --seed 1
-```
-
-**Training with 70% Image Modality Drop**
-
-```bash
-python train.py --dataset mm_imdb --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --train_img_drop 70 --seed 1
-```
-
-**Training with 70% Text Modality Drop**
-
-```bash
-python train.py --dataset mm_imdb --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --train_txt_drop 70 --seed 1
-```
-
-### 4.3. Hateful Memes
-
-**Canonical MSM**
-
-```bash
+``` bash
+python train.py --dataset food101 --fusion hadamard --dim_embed 100 --use_msm --seed 1
+python train.py --dataset mm_imdb --fusion hadamard --dim_embed 21 --use_msm --seed 1
 python train.py --dataset hateful_memes --fusion hadamard --dim_embed 1 --use_msm --seed 1
 ```
 
-**Uplifted MSM**
+The class counts are 101, 22, and 2 respectively, giving canonical
+dimensions 100, 21, and 1.
 
-```bash
-python train.py --dataset hateful_memes --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --seed 1
+### 3.3 Cross-entropy baseline
+
+Do not pass `--use_msm` for a standard CE classifier:
+
+``` bash
+python train.py --dataset food101 --fusion hadamard --dim_embed 512 --seed 1
 ```
 
-**Training with 70% Image Modality Drop**
+### 3.4 Training-time modality dropout
 
-```bash
-python train.py --dataset hateful_memes --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --train_img_drop 70 --seed 1
+Training dropout zeroes the selected modality features for a randomly
+selected percentage of training samples.
+
+``` bash
+# Drop image features for 70% of training samples
+python train.py --dataset food101 --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --train_img_drop 70 --seed 1
+
+# Drop text features for 70% of training samples
+python train.py --dataset food101 --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --train_txt_drop 70 --seed 1
 ```
 
-**Training with 70% Text Modality Drop**
+Image and text dropout can also be combined.
 
-```bash
-python train.py --dataset hateful_memes --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --train_txt_drop 70 --seed 1
-```
+## 4. Multi-seed experiments
 
----
+Example: fixed isometric uplift with five training seeds.
 
-## 5. Multi-Seed Experiments
+Linux/macOS:
 
-For reproducibility, experiments can be repeated using multiple random seeds.
-
-For example, to run the uplifted MSM configuration on Food-101 using five seeds:
-
-```bash
+``` bash
 for seed in 1 2 3 4 5; do
-    python train.py \
-        --dataset food101 \
-        --fusion hadamard \
-        --dim_embed 512 \
-        --use_msm \
-        --msm_uplift \
-        --seed $seed
+    python train.py --dataset food101 --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --seed "$seed"
 done
 ```
 
-Repeat the same procedure for other datasets, fusion strategies, and embedding dimensions as required.
+Windows Command Prompt:
 
----
-
-## 6. Experimental Results and Output
-
-Each training run automatically generates a CSV file containing the missing-modality benchmark evaluation results.
-
-All generated CSV files are saved in:
-
-```text
-output/
+``` bat
+for %s in (1 2 3 4 5) do python train.py --dataset food101 --fusion hadamard --dim_embed 512 --use_msm --msm_uplift --seed %s
 ```
 
-The output filenames follow the experiment-specific naming convention and include:
+Replace `--msm_uplift` with `--msm_learn_q`, or `--msm_linear` to run the other variants.
 
-```text
-output/**_missing_benchmark_**.csv
+## 5. Checkpoints and output
+
+The training script saves checkpoints under:
+
+``` text
+raw_ckpt/{dataset}/{fusion}/{method}/aux{aux_weight}/seed{seed}/dim{dim}/checkpoint_last.pth.tar
+best/{dataset}/{fusion}/{method}/aux{aux_weight}/seed{seed}/dim{dim}/best_model.pth.tar
 ```
 
-### 6.1. Evaluation Metrics
+The missing-modality benchmark CSV is saved under:
 
-The CSV files contain the following columns, depending on the dataset:
-
-| Dataset | Evaluation Metrics |
-|---|---|
-| UPMC Food-101 | `top1`, `top5` |
-| MM-IMDb | `f1_macro`, `f1_weighted` |
-| Hateful Memes | `auroc`, `acc` |
-
-The missing-modality configuration is recorded using:
-
-- `img_missing`: Percentage of missing image modality.
-- `text_missing`: Percentage of missing text modality.
-
-### 6.2. CSV Structure
-
-**Food-101:**
-
-```csv
-img_missing,text_missing,top1,top5
+``` text
+output/{dataset}/{fusion}/{method}/aux{aux_weight}/seed{seed}/dim{dim}/
 ```
 
-**MM-IMDb:**
+The method name identifies the run: `CE`, `MSM`, `MSM_UPLIFT`, `MSM_LEARN_Q`, or `MSM_LINEAR`, as applicable.
 
-```csv
-img_missing,text_missing,f1_macro,f1_weighted
+## 6. Evaluating a saved checkpoint
+
+Training already evaluates the best checkpoint and writes its benchmark
+CSV. To evaluate a checkpoint separately:
+
+``` bash
+python eval_checkpoint.py food101 PATH_TO_CHECKPOINT --seed 1 --out_csv evaluation.csv
 ```
 
-**Hateful Memes:**
+General form:
 
-```csv
-img_missing,text_missing,auroc,acc
+``` bash
+python eval_checkpoint.py [food101|mm_imdb|hateful_memes] PATH_TO_CHECKPOINT [--feat_dir PATH] [--thresholds FILE.npy] [--seed N] [--no_cuda] [--out_csv FILE.csv]
 ```
 
----
+  -----------------------------------------------------------------------
+  Argument                            Description
+  ----------------------------------- -----------------------------------
+  `dataset`                           Positional dataset: `food101`,
+                                      `mm_imdb`, or `hateful_memes`.
 
-## 7. Mapping Experimental Results to Paper Tables
-Note: There's no need to run separate eval script, training script automatically does evaluation on test set. So CSV results are evaluated on unseen test set.
-The following mapping explains how to extract the relevant CSV rows for the paper's experimental tables.
+  `checkpoint`                        Positional path to a `.pth.tar`
+                                      checkpoint.
 
-### 7.1. Table 1: Text Modality Missingness
+  `--feat_dir`                        Optional feature-directory
+                                      override.
 
-For Table 1, use the model trained without additional training-time modality dropout.
+  `--thresholds`                      Optional MM-IMDb per-class
+                                      threshold `.npy` file. If omitted,
+                                      thresholds are optimized on the
+                                      validation set.
 
-Keep the image modality fully available (`img_missing = 0`) and vary text missingness.
+  `--seed`                            Evaluation/missingness seed
+                                      (default: `42`).
 
-| Paper Configuration | `img_missing` | `text_missing` |
-|---|---:|---:|
-| 100% Text Available| 0 | 0  |
-| 90% Text Available | 0 | 10 |
-| 70% Text Available | 0 | 30 |
-| 50% Text Available | 0 | 50 |
-| 30% Text Available | 0 | 70 |
-| 10% Text Available | 0 | 90 |
+  `--no_cuda`                         Forces CPU evaluation.
 
-**Interpretation:** `text_missing = 70` means that 70% of the text modality is missing, leaving 30% available.
+  `--out_csv`                         Optional output path for the
+                                      missing-modality benchmark CSV.
+  -----------------------------------------------------------------------
 
-### 7.2. Table 2: Cross-Modality Missingness
+## 7. Benchmark metrics and missingness
 
-For Table 2, use models trained with modality-specific dropout.
+  Dataset         Metrics
+  --------------- ---------------------------
+  UPMC Food-101   `top1`, `top5`
+  MM-IMDb         `f1_macro`, `f1_weighted`
+  Hateful Memes   `auroc`, `acc`
 
-| Paper Configuration | Training Configuration | `img_missing` | `text_missing` |
-|---|---|---:|---:|
-| 100% Image, 30% Text | Text-drop-70 model | 0 | 70 |
-| 30% Image, 100% Text | Image-drop-70 model | 70 | 0 |
+CSV missingness columns:
 
-**Important:** 
-- For the first configuration, use the model trained with `--train_txt_drop 70`.
-- For the second configuration, use the model trained with `--train_img_drop 70`.
-- Read the corresponding evaluation rows from the generated CSV files.
+-   `img_missing`: percentage of image modality missing.
+-   `text_missing`: percentage of text modality missing.
 
----
+For a text-missingness evaluation, keep `img_missing = 0` and vary
+`text_missing`. For image-missingness evaluation, keep
+`text_missing = 0` and vary `img_missing`.
+
+For example, `text_missing = 70` means 70% of text features are zeroed
+at evaluation, leaving 30% available.
+
+## 8. Important experimental notes
+
+-   `--use_msm` is required for all MSM configurations.
+-   `--msm_uplift`, `--msm_learn_q`, and `--msm_linear` are alternative choices; do not combine them.
+-   The three explicit projection flags automatically activate the
+    uplift path.
+-   Learn-Q is orthogonal only at initialization; the current code does
+    not impose an orthogonality constraint during training.
+-   Linear Xavier is trainable but does not have an ETF-preserving
+    initialization.
+-   For fair comparisons, keep dataset splits, fusion, embedding
+    dimension, training configuration, evaluation seed, and missingness
+    masks consistent.
