@@ -9,8 +9,8 @@ prototypes, and MSM projection variants.
 Download the precomputed CLIP features and extract them into:
 
 Downloads: [Food-101](https://zenodo.org/records/24032786),
-[MM-IMDb](https://zenodo.org/records/24033803), [Hateful
-Memes](https://zenodo.org/records/24034415).
+[MM-IMDb](https://zenodo.org/records/24305208), [Hateful
+Memes](https://zenodo.org/records/24305670).
 
 Extract the downloaded files into their respective directories, preserving the expected directory structure.
 
